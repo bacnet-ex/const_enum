@@ -17,11 +17,12 @@ defmodule ConstEnum.MixProject do
       source_url: @source_url,
       description: "ConstEnum is a simple constant enum library.",
       docs: [
-        main: "ConstEnum",
+        main: "readme",
         source_ref: "master",
         groups_for_docs: [Guards: & &1[:guard]],
         groups_for_modules: [],
-        nest_modules_by_prefix: []
+        nest_modules_by_prefix: [],
+        extras: ["README.md"]
         # before_closing_head_tag: &docs_before_closing_head_tag/1,
         # before_closing_body_tag: &docs_before_closing_body_tag/1
       ],
