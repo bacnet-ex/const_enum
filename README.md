@@ -1,4 +1,4 @@
-# ConstEnum
+# ConstEnum [![CI Tests](https://github.com/bacnet-ex/const_enum/workflows/Elixir%20CI/badge.svg)](https://github.com/bacnet-ex/const_enum/actions?query=branch%3Amaster) [![Hex.pm](https://img.shields.io/hexpm/v/const_enum.svg)](https://hex.pm/packages/const_enum) [![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/const_enum)
 
 ConstEnum is a simple constant enum library. This library has been refactored out from the library [bacstack](https://github.com/bacnet-ex/bacstack).
 
