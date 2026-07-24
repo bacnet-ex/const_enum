@@ -13,6 +13,8 @@ defmodule ConstEnum do
       module docs, the constants docs will be appended to it
 
   Constants can be annotated with the `constdoc` attribute to provide a documentation string for the constant type.
+  The `ctypedoc` attribute will set the type description (if types are generated and `constdoc` are not copied to the type).
+  The `ctable` attribute allows with `false` to disable generating a moduledoc table section for the type (any other value ignored).
 
   The following functions and macros are created to work with the constants:
     - Function `assert_name/2` - Asserts that the constant exists (returns the name) as success tuple
@@ -35,13 +37,15 @@ defmodule ConstEnum do
   The `use` hook to get started with defining constants (enums).
 
   The following options are available:
+  - `copy_doc_to_type: boolean()` - Optional. Copy the docs from the constant to the types.
   - `exception: module()` - Optional. The exception module to use.
   - `generate_docs: boolean()` - Optional. Generate documentation for each constant type.
     This will include generating types by default. Types have the `type` as their name.
     For values, this will be the `type` with the suffix `_value`.
   - `generate_types_value: boolean()` - Optional. Generate types for not only the name,
     but also the values.
-  - `copy_doc_to_type: boolean()` - Optional. Copy the docs from the constant to the types.
+  - `ignore_duplicates: boolean()` - Optional. Sets the pattern match clause as generated
+    and thus will silence any warning about duplicate matches (i.e. duplicated name or value).
   - `no_types: boolean()` - Optional. Do not generate any types.
   """
   @spec __using__(Keyword.t()) :: Macro.t()
@@ -56,6 +60,7 @@ defmodule ConstEnum do
       @constants_typespecs_values unquote(opts[:generate_types_value] == true)
       @constants_typedoc_copy unquote(opts[:copy_doc_to_type] == true)
       @constants_no_types unquote(opts[:no_types] == true)
+      @constants_ignore_duplicates unquote(opts[:ignore_duplicates] == true)
 
       import unquote(__MODULE__)
       @before_compile unquote(__MODULE__)
@@ -76,25 +81,36 @@ defmodule ConstEnum do
   @spec __before_compile__(Macro.Env.t()) :: Macro.t()
   defmacro __before_compile__(env) do
     const_cases =
-      for {type, name, value, _docs, _cdocs} <- Module.get_attribute(env.module, :constants) do
-        quote do
-          {unquote(type), unquote(name), nil} ->
-            {:ok, {unquote(type), unquote(name), unquote(value)}}
+      for {type, name, value, _docs, _cdocs, _ctable} <-
+            Module.get_attribute(env.module, :constants) do
+        clause =
+          quote do
+            {unquote(type), unquote(name), nil} ->
+              {:ok, {unquote(type), unquote(name), unquote(value)}}
 
-          {unquote(type), nil, unquote(value)} ->
-            {:ok, {unquote(type), unquote(name), unquote(value)}}
+            {unquote(type), nil, unquote(value)} ->
+              {:ok, {unquote(type), unquote(name), unquote(value)}}
+          end
+
+        if Module.get_attribute(env.module, :constants_ignore_duplicates) do
+          # Manually mark all branches as generated
+          Enum.map(clause, fn {key, meta, args} ->
+            {key, Keyword.put(meta, :generated, true), args}
+          end)
+        else
+          clause
         end
       end
 
     catch_case =
       quote do
-        term -> :error
+        _term -> :error
       end
 
     cases = List.flatten([const_cases, catch_case])
 
     generated_const_call =
-      quote do
+      quote generated: true do
         defp const_call(type, name, value) do
           case {type, name, value} do
             unquote(cases)
@@ -286,10 +302,12 @@ defmodule ConstEnum do
 
       @constants {unquote(type), unquote(name), unquote(value),
                   Module.get_attribute(__MODULE__, :constdoc),
-                  Module.get_attribute(__MODULE__, :ctypedoc)}
+                  Module.get_attribute(__MODULE__, :ctypedoc),
+                  Module.get_attribute(__MODULE__, :ctable)}
 
       Module.delete_attribute(__MODULE__, :constdoc)
       Module.delete_attribute(__MODULE__, :ctypedoc)
+      Module.delete_attribute(__MODULE__, :ctable)
     end
   end
 
@@ -478,10 +496,10 @@ defmodule ConstEnum do
 
     grouped_constants =
       if needs_grouping do
-        Enum.group_by(constants, fn {type, _name, _value, _cdoc, _tdoc} -> type end)
+        Enum.group_by(constants, fn {type, _name, _value, _cdoc, _tdoc, _ctable} -> type end)
       else
         case constants do
-          [{type, _name, _value, _cdoc, _tdoc} | _tl] -> %{type => constants}
+          [{type, _name, _value, _cdoc, _tdoc, _ctable} | _tl] -> %{type => constants}
           _term -> %{}
         end
       end
@@ -497,12 +515,17 @@ defmodule ConstEnum do
             |> Enum.map_join(" ", &String.capitalize/1)
 
           # true = no docs (no constant and no type)
-          constant_description =
+          {constant_description, ctable} =
             Enum.find_value(group, fn
-              {_type, _name, _value, false, _tdoc} -> true
-              {_type, _name, _value, cdoc, _tdoc} when not is_nil(cdoc) -> "\n\n" <> cdoc
-              _else -> false
-            end) || ""
+              {_type, _name, _value, false, _tdoc, ctable} ->
+                {true, ctable}
+
+              {_type, _name, _value, cdoc, _tdoc, ctable} when not is_nil(cdoc) ->
+                {"\n\n" <> cdoc, ctable}
+
+              _else ->
+                false
+            end) || {"", nil}
 
           # true = no docs (no type)
           type_description =
@@ -515,29 +538,40 @@ defmodule ConstEnum do
           if constant_description == true do
             nil
           else
-            header = """
-            ### Constants: #{name} #{constant_description}
+            header =
+              if ctable == false do
+                ""
+              else
+                """
+                ### Constants: #{name} #{constant_description}
 
-            Type: `:#{type}`
+                Type: `:#{type}`
 
-            | Name                         | Value     | Value Bin | Value Hex |
-            |------------------------------|-----------|-----------|-----------|
-            """
+                | Name                         | Value     | Value Bin | Value Hex |
+                |------------------------------|-----------|-----------|-----------|
+                """
+              end
 
             {table, specs} =
               group
-              |> Enum.sort_by(fn {_type, name, _value, _cdoc, _tdoc} -> name end)
-              |> Enum.reduce({"", %{}}, fn {_type, name, value, _cdoc, _tdoc}, {tab, specs} ->
-                {binary_val, hex_val} =
-                  if is_integer(value) do
-                    binary = Integer.to_string(value, 2)
-                    hex = Integer.to_string(value, 16)
-                    {"`0b#{binary}`", "`0x#{hex}`"}
+              |> Enum.sort_by(fn {_type, name, _value, _cdoc, _tdoc, _ctable} -> name end)
+              |> Enum.reduce({"", %{}}, fn {_type, name, value, _cdoc, _tdoc, _ctable},
+                                           {tab, specs} ->
+                new_tab =
+                  if ctable == false do
+                    ""
                   else
-                    {"-", "-"}
-                  end
+                    {dec_val, binary_val, hex_val} =
+                      if is_integer(value) do
+                        binary = Integer.to_string(value, 2)
+                        hex = Integer.to_string(value, 16)
+                        {Integer.to_string(value), "`0b#{binary}`", "`0x#{hex}`"}
+                      else
+                        {"`#{inspect(value)}`", "-", "-"}
+                      end
 
-                new_tab = tab <> "| #{name} | #{value} | #{binary_val} | #{hex_val} |\n"
+                    tab <> "| #{name} | #{dec_val} | #{binary_val} | #{hex_val} |\n"
+                  end
 
                 type =
                   if type_description != false and type_description != true and not no_types do
@@ -664,11 +698,11 @@ defmodule ConstEnum do
   @spec calculate_needs_grouping(list(), atom()) :: boolean()
   defp calculate_needs_grouping([], _type), do: false
 
-  defp calculate_needs_grouping([{type, _name, _value, _doc} | tail], nil) do
+  defp calculate_needs_grouping([{type, _name, _value, _cdoc, _tdoc, _ctable} | tail], nil) do
     calculate_needs_grouping(tail, type)
   end
 
-  defp calculate_needs_grouping([{type, _name, _value, _doc} | tail], type) do
+  defp calculate_needs_grouping([{type, _name, _value, _cdoc, _tdoc, _ctable} | tail], type) do
     calculate_needs_grouping(tail, type)
   end
 
