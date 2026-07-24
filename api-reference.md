@@ -1,0 +1,7 @@
+# const_enum v0.2.0 - API Reference
+
+## Modules
+
+- [ConstEnum](ConstEnum.md): This module provides macros to define constants, which get compiled into functions.
+To use this feature, this module must be included into the module using `use/2`.
+
