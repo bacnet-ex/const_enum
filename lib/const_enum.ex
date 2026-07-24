@@ -530,8 +530,8 @@ defmodule ConstEnum do
           # true = no docs (no type)
           type_description =
             Enum.find_value(group, fn
-              {_type, _name, _value, _cdoc, false} -> true
-              {_type, _name, _value, _cdoc, tdoc} when not is_nil(tdoc) -> tdoc
+              {_type, _name, _value, _cdoc, false, _ctable} -> true
+              {_type, _name, _value, _cdoc, tdoc, _ctable} when not is_nil(tdoc) -> tdoc
               _else -> false
             end)
 
